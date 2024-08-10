@@ -18,11 +18,9 @@ int main() {
     }
     printf("...\n");
 
-
     gpu_blelloch_scan(h_out, h_in, n);
 
     // Print output array (first 10 elements)
-
     printf("Output: ");
     for (int i = 0; i < 10 && i < n; i++) {
         printf("%d ", h_out[i]);
