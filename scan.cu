@@ -81,7 +81,6 @@ __global__ void add_block_sums(int* d_out, int* d_block_sums, int n, int block_s
     }
 }
 
-// Slow because memory transfers are expensive
 void gpu_blelloch_scan(int* h_out, int* h_in, int n) {
     int *d_in, *d_out;
     cudaMalloc((void**)&d_in, n * sizeof(int));
