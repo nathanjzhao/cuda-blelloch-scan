@@ -7,71 +7,129 @@
 __global__ void blelloch_scan_kernel(int* d_out, int* d_in, int n) {
     extern __shared__ int temp[];
 
-    // Thread ID
     int thid = threadIdx.x;
+    int block_size = blockDim.x;
+    int block_offset = blockIdx.x * block_size * 2;
     int offset = 1;
 
     // Load input into shared memory
-    temp[2*thid] = (2*thid < n) ? d_in[2*thid] : 0;
-    temp[2*thid+1] = (2*thid+1 < n) ? d_in[2*thid+1] : 0;
+    int ai = block_offset + thid;
+    int bi = ai + block_size;
+    temp[thid] = (ai < n) ? d_in[ai] : 0;
+    temp[thid + block_size] = (bi < n) ? d_in[bi] : 0;
 
     // Upsweep phase
-    for (int d = n>>1; d > 0; d >>= 1) {
+    for (int d = block_size; d > 0; d >>= 1) {
         __syncthreads();
+
+        // Parallelizes d threads at same time
         if (thid < d) {
-            int ai = offset*(2*thid+1)-1;
-            int bi = offset*(2*thid+2)-1;
-            temp[bi] += temp[ai];
+            int ai = offset * (2 * thid + 1) - 1;
+            int bi = offset * (2 * thid + 2) - 1;
+            if (bi < 2 * block_size) temp[bi] += temp[ai];
         }
         offset *= 2;
     }
 
     // Clear the last element
-    if (thid == 0) {
-        temp[n - 1] = 0;
-    }
+    if (thid == 0) temp[2 * block_size - 1] = 0;
 
     // Downsweep phase
-    for (int d = 1; d < n; d *= 2) {
+    for (int d = 1; d < 2 * block_size; d *= 2) {
         offset >>= 1;
         __syncthreads();
+
+        // Parallelizes d threads at same time
         if (thid < d) {
-            int ai = offset*(2*thid+1)-1;
-            int bi = offset*(2*thid+2)-1;
-            int t = temp[ai];
-            temp[ai] = temp[bi];
-            temp[bi] += t;
+            int ai = offset * (2 * thid + 1) - 1;
+            int bi = offset * (2 * thid + 2) - 1;
+            if (bi < 2 * block_size) {
+                int t = temp[ai];
+                temp[ai] = temp[bi];
+                temp[bi] += t;
+            }
         }
     }
 
     __syncthreads();
 
     // Write results to device memory
-    if (2*thid < n) d_out[2*thid] = temp[2*thid];
-    if (2*thid+1 < n) d_out[2*thid+1] = temp[2*thid+1];
+    if (ai < n) d_out[ai] = temp[thid];
+    if (bi < n) d_out[bi] = temp[thid + block_size];
+}
+
+__global__ void extract_block_sums(int* d_block_sums, int* d_out, int n, int block_size) {
+    int idx = threadIdx.x;
+    int block_end = (idx + 1) * block_size - 1;
+    if (block_end < n) {
+        d_block_sums[idx] = d_out[block_end];
+    } else if (idx * block_size < n) {
+        d_block_sums[idx] = d_out[n - 1];
+    } else {
+        d_block_sums[idx] = 0;
+    }
+}
+
+__global__ void add_block_sums(int* d_out, int* d_block_sums, int n, int block_size) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int block_idx = blockIdx.x;
+    
+    if (idx < n && block_idx > 0) {
+        d_out[idx] += d_block_sums[block_idx - 1];
+    }
 }
 
 void gpu_blelloch_scan(int* h_out, int* h_in, int n) {
     int *d_in, *d_out;
-    
-    // Allocate device memory
     cudaMalloc((void**)&d_in, n * sizeof(int));
     cudaMalloc((void**)&d_out, n * sizeof(int));
-
-    // Copy input from host to device memory
     cudaMemcpy(d_in, h_in, n * sizeof(int), cudaMemcpyHostToDevice);
 
-    // Compute launch configuration -- will have less blocks with more elements in array
-    int block_size = 128;
-    int num_blocks = (n + block_size - 1) / block_size;
+    int block_size = 1<<4; // change based on size of n
+    int num_blocks = (n + block_size * 2 - 1) / (block_size * 2);
+    int shared_mem_size = block_size * 2 * sizeof(int);
 
-    // Launch kernel
-    blelloch_scan_kernel<<<num_blocks, block_size, n * sizeof(int)>>>(d_out, d_in, n);
+    blelloch_scan_kernel<<<num_blocks, block_size, shared_mem_size>>>(d_out, d_in, n);
 
-    // Copy result from device to host memory
+    // Print block sums
+    int* h_block_sums = new int[num_blocks];
+    
+    // Allocate and extract block sums
+    int* d_block_sums;
+    cudaMalloc((void**)&d_block_sums, num_blocks * sizeof(int));
+    extract_block_sums<<<1, num_blocks>>>(d_block_sums, d_out, n, block_size * 2);
+    
+    // Copy block sums to host for showing sums of each block
+    cudaMemcpy(h_block_sums, d_block_sums, num_blocks * sizeof(int), cudaMemcpyDeviceToHost);
+    printf("Block sums: ");
+    for (int i = 0; i < num_blocks; i++) {
+        printf("%d ", h_block_sums[i]);
+    }
+    printf("\n");
+    
+    delete[] h_block_sums;
+    cudaFree(d_block_sums);
+
+
+
+    // Handle block sums
+    if (num_blocks > 1) {
+        int* d_block_sums;
+        cudaMalloc((void**)&d_block_sums, num_blocks * sizeof(int));
+        
+        // Extract last element of each block
+        extract_block_sums<<<1, num_blocks>>>(d_block_sums, d_out, n, block_size * 2);
+        
+        // Scan block sums
+        blelloch_scan_kernel<<<1, num_blocks, num_blocks * sizeof(int)>>>(d_block_sums, d_block_sums, num_blocks);
+        
+        // Add block sums back
+        add_block_sums<<<num_blocks, block_size>>>(d_out, d_block_sums, n, block_size * 2);
+        
+        cudaFree(d_block_sums);
+    }
+
     cudaMemcpy(h_out, d_out, n * sizeof(int), cudaMemcpyDeviceToHost);
-
-    // Free device memory
     cudaFree(d_in);
     cudaFree(d_out);
 }
