@@ -11,7 +11,7 @@ double get_time() {
 }
 
 int main() {
-    const int n = 1<<7;
+    const int n = 1<<4;
     int h_in[n], h_out_cpu_naive[n], h_out_cpu_blelloch[n], h_out_gpu_blelloch[n];
 
     // Initialize input array with random digits (0-9)
@@ -48,21 +48,20 @@ int main() {
     printf("CPU Blelloch Scan Time: %.6f seconds\n", end - start);
 
     // Compare results
-    bool cpu_naive_correct = true;
-    bool cpu_blelloch_correct = true;
-    bool gpu_blelloch_correct = true;
+    bool cpu_naive_match = true;
+    bool cpu_blelloch_match = true;
 
     for (int i = 0; i < n; i++) {
         if (h_out_cpu_naive[i] != h_out_gpu_blelloch[i]) {
-            cpu_naive_correct = false;
+            cpu_naive_match = false;
         }
         if (h_out_cpu_blelloch[i] != h_out_gpu_blelloch[i]) {
-            cpu_blelloch_correct = false;
+            cpu_blelloch_match = false;
         }
     }
 
-    printf("CPU Naive Sum matches GPU Blelloch Scan: %s\n", cpu_naive_correct ? "Yes" : "No");
-    printf("CPU Blelloch Scan matches GPU Blelloch Scan: %s\n", cpu_blelloch_correct ? "Yes" : "No");
+    printf("CPU Naive Sum matches GPU Blelloch Scan: %s\n", cpu_naive_match ? "Yes" : "No");
+    printf("CPU Blelloch Scan matches GPU Blelloch Scan: %s\n", cpu_blelloch_match ? "Yes" : "No");
 
     // Print output array (first 10 elements)
     printf("GPU Blelloch Scan Output: ");
@@ -70,20 +69,6 @@ int main() {
         printf("%d ", h_out_gpu_blelloch[i]);
     }
     printf("...\n");
-
-    // // Print output array (first 10 elements)
-    // printf("CPU Blelloch Scan Output: ");
-    // for (int i = 0; i < 10 && i < n; i++) {
-    //     printf("%d ", h_out_cpu_blelloch[i]);
-    // }
-    // printf("...\n");
-
-    // // Print output array (first 10 elements)
-    // printf("CPU Naive Scan Output: ");
-    // for (int i = 0; i < 10 && i < n; i++) {
-    //     printf("%d ", h_out_cpu_naive[i]);
-    // }
-    // printf("...\n");
 
     return 0;
 }

@@ -58,6 +58,7 @@ __global__ void blelloch_scan_kernel(int* d_out, int* d_in, int n) {
     if (bi < n) d_out[bi] = temp[thid + block_size];
 }
 
+// Extract block sums 
 __global__ void extract_block_sums(int* d_block_sums, int* d_out, int n, int block_size) {
     int idx = threadIdx.x;
     int block_end = (idx + 1) * block_size - 1;
@@ -70,6 +71,7 @@ __global__ void extract_block_sums(int* d_block_sums, int* d_out, int n, int blo
     }
 }
 
+// Add block sums of previous blocks to each item in the block
 __global__ void add_block_sums(int* d_out, int* d_block_sums, int n, int block_size) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int block_idx = blockIdx.x;
@@ -79,6 +81,7 @@ __global__ void add_block_sums(int* d_out, int* d_block_sums, int n, int block_s
     }
 }
 
+// Slow because memory transfers are expensive
 void gpu_blelloch_scan(int* h_out, int* h_in, int n) {
     int *d_in, *d_out;
     cudaMalloc((void**)&d_in, n * sizeof(int));
@@ -93,13 +96,10 @@ void gpu_blelloch_scan(int* h_out, int* h_in, int n) {
 
     // Print block sums
     int* h_block_sums = new int[num_blocks];
-    
-    // Allocate and extract block sums
     int* d_block_sums;
     cudaMalloc((void**)&d_block_sums, num_blocks * sizeof(int));
     extract_block_sums<<<1, num_blocks>>>(d_block_sums, d_out, n, block_size * 2);
     
-    // Copy block sums to host for showing sums of each block
     cudaMemcpy(h_block_sums, d_block_sums, num_blocks * sizeof(int), cudaMemcpyDeviceToHost);
     printf("Block sums: ");
     for (int i = 0; i < num_blocks; i++) {
@@ -107,9 +107,9 @@ void gpu_blelloch_scan(int* h_out, int* h_in, int n) {
     }
     printf("\n");
     
+    // Clear print block sum artifacts
     delete[] h_block_sums;
     cudaFree(d_block_sums);
-
 
 
     // Handle block sums
